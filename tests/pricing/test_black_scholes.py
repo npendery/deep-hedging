@@ -112,3 +112,53 @@ def test_theta_matches_finite_difference():
     fd_theta = -(up - dn) / (2 * h)
     theta = bs_theta(S, K, tau, r, sigma, q=q, kind="call")
     assert torch.allclose(theta, fd_theta, atol=1e-2)
+
+
+def test_tau_zero_atm_price_zero_no_nan():
+    # At tau exactly 0, ATM intrinsic value = max(S-K,0) = 0; must be finite (no NaN).
+    S = torch.tensor(100.0)
+    K = torch.tensor(100.0)
+    price = bs_price(S, K, 0.0, 0.0, 0.2, kind="call")
+    assert torch.isfinite(price).all()
+    assert torch.allclose(price, torch.tensor(0.0), atol=1e-5)
+
+
+def test_tau_zero_intrinsic_value_itm_otm():
+    # ITM call at expiry -> S-K; OTM call -> 0. tau=0 must not divide by zero.
+    K = torch.tensor(100.0)
+    itm = bs_price(torch.tensor(130.0), K, 0.0, 0.0, 0.2, kind="call")
+    otm = bs_price(torch.tensor(70.0), K, 0.0, 0.0, 0.2, kind="call")
+    assert torch.isfinite(itm) and torch.isfinite(otm)
+    assert torch.allclose(itm, torch.tensor(30.0), atol=1e-5)
+    assert torch.allclose(otm, torch.tensor(0.0), atol=1e-5)
+
+
+def test_tau_zero_greeks_finite_and_negligible():
+    # At tau=0 ATM the clamp keeps everything finite; vega/gamma/theta -> ~0.
+    S = torch.tensor(100.0)
+    K = torch.tensor(100.0)
+    vega = bs_vega(S, K, 0.0, 0.0, 0.2)
+    gamma = bs_gamma(S, K, 0.0, 0.0, 0.2)
+    theta = bs_theta(S, K, 0.0, 0.0, 0.2, kind="call")
+    delta = bs_delta(S, K, 0.0, 0.0, 0.2, kind="call")
+    for g in (vega, gamma, theta, delta):
+        assert torch.isfinite(g).all()
+    assert vega.abs().item() < 1e-3
+    assert theta.abs().item() < 1e-3
+    # ATM at the clamp boundary: delta sits near the 0.5 boundary, gamma is large
+    # but finite (1/sqrt(tau_floor)); both must be free of NaN. Delta in [0,1].
+    assert 0.0 <= delta.item() <= 1.0
+
+
+def test_tau_zero_vector_no_nan_mixed_moneyness():
+    # Broadcasting with tau=0 across a vector of spots must never produce NaN.
+    gen = torch.Generator().manual_seed(7)
+    S = 50.0 + 100.0 * torch.rand(64, generator=gen)
+    K = torch.tensor(100.0)
+    price = bs_price(S, K, 0.0, 0.0, 0.2, kind="call")
+    delta = bs_delta(S, K, 0.0, 0.0, 0.2, kind="call")
+    assert torch.isfinite(price).all()
+    assert torch.isfinite(delta).all()
+    # Each price equals intrinsic value max(S-K,0) at expiry.
+    intrinsic = torch.clamp(S - K, min=0.0)
+    assert torch.allclose(price, intrinsic, atol=1e-5)
