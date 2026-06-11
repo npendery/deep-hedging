@@ -1,6 +1,9 @@
 # tests/test_portfolio.py
 import torch
-from deephedge.portfolio import StepState, PnLResult
+from deephedge.config import ExperimentConfig
+from deephedge.simulators.gbm import simulate_gbm
+from deephedge.instruments import EuropeanOption
+from deephedge.portfolio import StepState, PnLResult, build_instr_prices
 
 
 def test_step_state_holds_fields():
@@ -31,3 +34,30 @@ def test_pnl_result_holds_fields():
     assert res.turnover.shape == (B,)
     assert res.cost.shape == (B,)
     assert res.holdings.shape == (B, 5, 1)
+
+
+def test_build_instr_prices_underlying_only_is_S():
+    cfg = ExperimentConfig(n_steps=5, n_paths=8, instruments=("underlying",))
+    gen = torch.Generator().manual_seed(0)
+    paths = simulate_gbm(cfg, n_paths=8, generator=gen)
+    option = EuropeanOption(strike=cfg.k, maturity=cfg.maturity, kind="call")
+    prices = build_instr_prices(cfg, paths, option)
+    # shape: (n_paths, n_steps+1, n_instruments)
+    assert prices.shape == (8, cfg.n_steps + 1, 1)
+    # underlying column equals the simulated path exactly
+    assert torch.equal(prices[:, :, 0], paths.S)
+
+
+def test_build_instr_prices_option_branch_not_implemented():
+    cfg = ExperimentConfig(
+        n_steps=5, n_paths=8, instruments=("underlying", "option")
+    )
+    gen = torch.Generator().manual_seed(0)
+    paths = simulate_gbm(cfg, n_paths=8, generator=gen)
+    option = EuropeanOption(strike=cfg.k, maturity=cfg.maturity, kind="call")
+    try:
+        build_instr_prices(cfg, paths, option)
+        raised = False
+    except NotImplementedError:
+        raised = True
+    assert raised, "option leg must raise NotImplementedError in this section"
