@@ -65,3 +65,24 @@ def test_gbm_different_seed_differs():
 
     # different seeds -> different paths (the initial column is equal, the rest is not)
     assert not torch.equal(paths_a.S[:, 1:], paths_c.S[:, 1:])
+
+
+def test_gbm_martingale_discounted_mean():
+    # mu=None -> drift = r = 0  => discount factor exp(-r*T)=1, E[S_T]=s0
+    cfg = ExperimentConfig(s0=100.0, sigma=0.2, r=0.0, mu=None, maturity=1.0, n_steps=50)
+    assert cfg.drift == 0.0
+    gen = torch.Generator(device=cfg.device).manual_seed(2024)
+    n_paths = 200_000
+
+    paths = simulate_gbm(cfg, n_paths, gen)
+    S_T = paths.S[:, -1]
+
+    discount = torch.exp(torch.tensor(-cfg.r * cfg.maturity))
+    discounted = discount * S_T
+    mc_mean = discounted.mean()
+    mc_stderr = discounted.std(unbiased=True) / (n_paths ** 0.5)
+
+    # |E[S_T]_hat - s0| <= 3 * MC stderr  (well over 99% of the time)
+    assert torch.abs(mc_mean - cfg.s0) <= 3.0 * mc_stderr
+    # stderr is small at this n_paths (sigma=0.2,T=1 => std(S_T)~20 => stderr~0.045)
+    assert mc_stderr < 0.1
