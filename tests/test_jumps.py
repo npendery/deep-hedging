@@ -72,7 +72,7 @@ def test_simulate_merton_shapes_and_state():
     assert torch.allclose(paths.S[:, 0], torch.full((n_paths,), cfg.s0, dtype=paths.S.dtype))
     # times grid is 0 .. maturity inclusive, evenly spaced.
     assert paths.times[0].item() == 0.0
-    assert abs(paths.times[-1].item() - cfg.maturity) < 1e-12
+    assert abs(paths.times[-1].item() - cfg.maturity) < 1e-6
     # Strictly positive prices (jumps act on the log-price -> S stays > 0).
     assert torch.all(paths.S > 0.0)
 
@@ -193,8 +193,7 @@ def test_simulate_merton_zero_intensity_matches_gbm_in_distribution():
     gbm = simulate_gbm(cfg, n_paths=n_paths, generator=g_g)
 
     st_m = merton.S[:, -1]
-    # cast GBM (float32) to float64 for a like-dtype comparison
-    st_g = gbm.S[:, -1].to(torch.float64)
+    st_g = gbm.S[:, -1]
     # Means and stds of S_T agree to <1% relative (both are the same GBM law).
     assert abs(st_m.mean().item() - st_g.mean().item()) / st_g.mean().item() < 0.01
     assert abs(st_m.std().item() - st_g.std().item()) / st_g.std().item() < 0.02

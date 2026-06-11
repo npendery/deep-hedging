@@ -34,10 +34,10 @@ def _sample_jumps(
     """
     device = torch.device(cfg.device)
     rate = torch.full(
-        (n_paths,), cfg.jump_intensity * cfg.dt, device=device, dtype=torch.float64
+        (n_paths,), cfg.jump_intensity * cfg.dt, device=device
     )
     counts = torch.poisson(rate, generator=generator)  # float tensor of non-neg ints
-    z = torch.randn(n_paths, generator=generator, device=device, dtype=torch.float64)
+    z = torch.randn(n_paths, generator=generator, device=device)
     jumps = counts * cfg.jump_mean + torch.sqrt(counts) * cfg.jump_std * z
     return jumps
 
@@ -70,18 +70,18 @@ def simulate_merton(
     comp = _jump_compensator(cfg)
     diffusion_drift = (cfg.drift - 0.5 * cfg.sigma ** 2) * dt - comp
 
-    log_s = torch.empty(n_paths, n + 1, device=device, dtype=torch.float64)
+    log_s = torch.empty(n_paths, n + 1, device=device)
     log_s[:, 0] = math.log(cfg.s0)
     sqrt_dt = math.sqrt(dt)
     for i in range(n):
-        z = torch.randn(n_paths, generator=generator, device=device, dtype=torch.float64)
+        z = torch.randn(n_paths, generator=generator, device=device)
         jumps = _sample_jumps(cfg, n_paths=n_paths, generator=generator)
         log_s[:, i + 1] = (
             log_s[:, i] + diffusion_drift + cfg.sigma * sqrt_dt * z + jumps
         )
 
     S = torch.exp(log_s)
-    times = torch.linspace(0.0, cfg.maturity, n + 1, device=device, dtype=torch.float64)
+    times = torch.linspace(0.0, cfg.maturity, n + 1, device=device)
     return Paths(S=S, V=None, dt=dt, times=times)
 
 
@@ -107,14 +107,14 @@ def simulate_bates(
     rho = cfg.rho
     sqrt_1m_rho2 = math.sqrt(max(1.0 - rho ** 2, 0.0))
 
-    log_s = torch.empty(n_paths, n + 1, device=device, dtype=torch.float64)
-    V = torch.empty(n_paths, n + 1, device=device, dtype=torch.float64)
+    log_s = torch.empty(n_paths, n + 1, device=device)
+    V = torch.empty(n_paths, n + 1, device=device)
     log_s[:, 0] = math.log(cfg.s0)
     V[:, 0] = cfg.v0
 
     for i in range(n):
-        za = torch.randn(n_paths, generator=generator, device=device, dtype=torch.float64)
-        zb = torch.randn(n_paths, generator=generator, device=device, dtype=torch.float64)
+        za = torch.randn(n_paths, generator=generator, device=device)
+        zb = torch.randn(n_paths, generator=generator, device=device)
         z1 = za
         z2 = rho * za + sqrt_1m_rho2 * zb
         jumps = _sample_jumps(cfg, n_paths=n_paths, generator=generator)
@@ -134,5 +134,5 @@ def simulate_bates(
         )
 
     S = torch.exp(log_s)
-    times = torch.linspace(0.0, cfg.maturity, n + 1, device=device, dtype=torch.float64)
+    times = torch.linspace(0.0, cfg.maturity, n + 1, device=device)
     return Paths(S=S, V=V, dt=dt, times=times)
