@@ -47,3 +47,22 @@ def test_train_entropic_loss_branch_has_no_w():
     assert history["w"] == []
     # entropic loss with profit-positive PnL is finite and not NaN
     assert all(x == x for x in history["loss"])  # NaN-check (NaN != NaN)
+
+
+def test_train_is_deterministic_with_fixed_seed():
+    cfg = _tiny_cfg(seed=7)
+
+    hedger_a, hist_a = train(cfg)
+    hedger_b, hist_b = train(cfg)
+
+    # identical loss trajectory
+    assert hist_a["loss"] == hist_b["loss"]
+    assert hist_a["w"] == hist_b["w"]
+    assert hist_a["premium"] == hist_b["premium"]
+
+    # identical learned parameters
+    sd_a = hedger_a.state_dict()
+    sd_b = hedger_b.state_dict()
+    assert sd_a.keys() == sd_b.keys()
+    for name in sd_a:
+        assert torch.equal(sd_a[name], sd_b[name]), f"param {name} differs across runs"
