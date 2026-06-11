@@ -50,3 +50,28 @@ def make_bs_delta_strategy(cfg: ExperimentConfig):
         return holdings
 
     return strategy
+
+
+from deephedge.hedger import build_features  # noqa: E402
+
+
+def make_nn_strategy(hedger, cfg: ExperimentConfig):
+    """Learned policy: build_features(...) -> Hedger.forward -> holdings.
+
+    Keeps the autograd graph intact so gradients flow from terminal P&L back
+    through the trajectory to ``hedger`` parameters (spec §9, §13(7)).
+    """
+
+    def strategy(state: StepState) -> torch.Tensor:
+        # Normalize tau to (T - t_i)/T and pass cfg.k as the moneyness strike, per the
+        # build_features contract. state.S may be (B,) — build_features reshapes to columns.
+        features = build_features(
+            state.S,
+            state.tau / cfg.maturity,
+            state.prev_holdings,
+            state.V,
+            k_norm=cfg.k,
+        )
+        return hedger(features)
+
+    return strategy
