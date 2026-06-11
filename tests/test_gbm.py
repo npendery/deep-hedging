@@ -1,0 +1,108 @@
+# tests/test_gbm.py
+import torch
+
+from deephedge.config import ExperimentConfig
+from deephedge.simulators.base import Paths, get_simulator
+from deephedge.simulators.gbm import simulate_gbm
+
+
+def test_gbm_shape_and_initial_condition():
+    cfg = ExperimentConfig(s0=100.0, sigma=0.2, maturity=1.0, n_steps=50)
+    gen = torch.Generator(device=cfg.device).manual_seed(0)
+    n_paths = 1000
+
+    paths = simulate_gbm(cfg, n_paths, gen)
+
+    assert isinstance(paths, Paths)
+    assert paths.S.shape == (n_paths, cfg.n_steps + 1)
+    assert paths.V is None
+    # exact dt and a (n_steps+1,) time grid from 0..maturity
+    assert paths.dt == cfg.dt
+    assert paths.times.shape == (cfg.n_steps + 1,)
+    assert float(paths.times[0]) == 0.0
+    assert torch.isclose(paths.times[-1], torch.tensor(cfg.maturity))
+    # every path starts at s0
+    assert torch.allclose(paths.S[:, 0], torch.full((n_paths,), cfg.s0))
+    # all prices strictly positive (exp keeps GBM positive)
+    assert torch.all(paths.S > 0)
+
+
+def test_get_simulator_gbm_dispatches_to_simulate_gbm():
+    cfg = ExperimentConfig(s0=100.0, sigma=0.2, maturity=1.0, n_steps=10)
+    gen = torch.Generator(device=cfg.device).manual_seed(0)
+    sim = get_simulator("gbm")
+    # get_simulator's lazy "gbm" branch returns simulate_gbm itself.
+    assert sim is simulate_gbm
+    paths = sim(cfg, 16, gen)
+    assert isinstance(paths, Paths)
+    assert paths.S.shape == (16, cfg.n_steps + 1)
+    assert paths.V is None
+
+
+def test_gbm_reproducible_with_same_seed():
+    cfg = ExperimentConfig(s0=100.0, sigma=0.2, maturity=1.0, n_steps=50)
+    n_paths = 500
+
+    gen_a = torch.Generator(device=cfg.device).manual_seed(1234)
+    gen_b = torch.Generator(device=cfg.device).manual_seed(1234)
+
+    paths_a = simulate_gbm(cfg, n_paths, gen_a)
+    paths_b = simulate_gbm(cfg, n_paths, gen_b)
+
+    # identical seed -> bit-identical paths
+    assert torch.equal(paths_a.S, paths_b.S)
+
+
+def test_gbm_different_seed_differs():
+    cfg = ExperimentConfig(s0=100.0, sigma=0.2, maturity=1.0, n_steps=50)
+    n_paths = 500
+
+    gen_a = torch.Generator(device=cfg.device).manual_seed(1234)
+    gen_c = torch.Generator(device=cfg.device).manual_seed(9999)
+
+    paths_a = simulate_gbm(cfg, n_paths, gen_a)
+    paths_c = simulate_gbm(cfg, n_paths, gen_c)
+
+    # different seeds -> different paths (the initial column is equal, the rest is not)
+    assert not torch.equal(paths_a.S[:, 1:], paths_c.S[:, 1:])
+
+
+def test_gbm_martingale_discounted_mean():
+    # mu=None -> drift = r = 0  => discount factor exp(-r*T)=1, E[S_T]=s0
+    cfg = ExperimentConfig(s0=100.0, sigma=0.2, r=0.0, mu=None, maturity=1.0, n_steps=50)
+    assert cfg.drift == 0.0
+    gen = torch.Generator(device=cfg.device).manual_seed(2024)
+    n_paths = 200_000
+
+    paths = simulate_gbm(cfg, n_paths, gen)
+    S_T = paths.S[:, -1]
+
+    discount = torch.exp(torch.tensor(-cfg.r * cfg.maturity))
+    discounted = discount * S_T
+    mc_mean = discounted.mean()
+    mc_stderr = discounted.std(unbiased=True) / (n_paths ** 0.5)
+
+    # |E[S_T]_hat - s0| <= 3 * MC stderr  (well over 99% of the time)
+    assert torch.abs(mc_mean - cfg.s0) <= 3.0 * mc_stderr
+    # stderr is small at this n_paths (sigma=0.2,T=1 => std(S_T)~20 => stderr~0.045)
+    assert mc_stderr < 0.1
+
+
+def test_gbm_terminal_log_variance_matches_sigma2T():
+    cfg = ExperimentConfig(s0=100.0, sigma=0.2, r=0.0, mu=None, maturity=1.0, n_steps=50)
+    gen = torch.Generator(device=cfg.device).manual_seed(7)
+    n_paths = 200_000
+
+    paths = simulate_gbm(cfg, n_paths, gen)
+    log_ret = torch.log(paths.S[:, -1] / cfg.s0)
+
+    sample_var = log_ret.var(unbiased=True)
+    expected_var = cfg.sigma ** 2 * cfg.maturity  # 0.2**2 * 1.0 = 0.04
+
+    # within ~3% relative (MC variance-of-variance is ~0.32% rel at this n_paths)
+    assert torch.isclose(sample_var, torch.tensor(expected_var), rtol=0.03)
+
+    # log-return mean should match (drift - 0.5*sigma^2)*T = -0.02
+    expected_mean = (cfg.drift - 0.5 * cfg.sigma ** 2) * cfg.maturity
+    mean_stderr = (sample_var / n_paths) ** 0.5
+    assert torch.abs(log_ret.mean() - expected_mean) <= 4.0 * mean_stderr
