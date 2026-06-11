@@ -51,3 +51,18 @@ def test_cvar_geq_var_geq_expected_loss():
     # Tail is genuinely heavier than the mean: strict gaps on this skewed sample.
     assert float(cvar) > float(var)
     assert float(var) > float(expected_loss)
+
+
+from deephedge.losses import entropic_loss
+
+
+def test_entropic_small_lambda_limit_recovers_negative_mean_pnl():
+    gen = torch.Generator().manual_seed(2)
+    n = 200_000
+    pnl = (0.3 + 1.5 * torch.randn(n, generator=gen)).to(torch.float64)
+
+    neg_mean = -pnl.mean()
+    val = entropic_loss(pnl, lam=1e-4)
+
+    assert val.shape == torch.Size([])
+    assert abs(float(val) - float(neg_mean)) < 1e-3
