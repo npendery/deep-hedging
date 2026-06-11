@@ -105,3 +105,36 @@ def test_hedger_shared_weights_param_count_independent_of_n_steps():
     #   total               = 1249
     assert base == 4 * 32 + 32 + 32 * 32 + 32 + 32 * 1 + 1
     assert base == 1249
+
+
+def test_gradients_flow_through_features_and_network():
+    gen = torch.Generator().manual_seed(123)
+    n_instruments = 1
+    B = 16
+
+    # Inputs that exercise both the feature builder and the network.
+    S_i = 100.0 + torch.randn(B, 1, generator=gen)
+    V_i = 0.04 + 0.01 * torch.randn(B, 1, generator=gen)
+    prev_holdings = torch.randn(B, n_instruments, generator=gen)
+    tau_norm = 0.5
+
+    feats = build_features(S_i, tau_norm, prev_holdings, V_i=V_i)
+    n_features = feats.shape[1]                       # 2 + n_instruments + 1 = 4
+    assert n_features == 4
+
+    torch.manual_seed(0)
+    hedger = Hedger(n_features=n_features, n_instruments=n_instruments, hidden=(32, 32))
+
+    holdings = hedger.forward(feats)                  # (B, n_instruments)
+    loss = holdings.pow(2).sum()                      # scalar, smooth in all params
+    loss.backward()
+
+    # Every parameter must receive a finite, present gradient (autograd graph is closed).
+    grads = list(hedger.parameters())
+    assert len(grads) > 0
+    for p in grads:
+        assert p.grad is not None
+        assert torch.isfinite(p.grad).all()
+
+    # At least one parameter has a non-zero gradient (signal actually flows, not all-dead-ReLU).
+    assert any(p.grad.abs().sum().item() > 0.0 for p in hedger.parameters())
