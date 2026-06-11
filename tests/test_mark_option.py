@@ -58,3 +58,44 @@ def test_mark_option_t0_column_matches_bs_price_with_cfg_sigma():
         kind=option.kind,
     )
     assert torch.allclose(marks[:, 0], expected0, atol=1e-6)
+
+
+def test_mark_option_is_differentiable_in_spot():
+    # MTM gains across the option leg must backprop into the spot path (spec §9).
+    cfg = ExperimentConfig(
+        s0=100.0, k=100.0, r=0.0, q=0.0, sigma=0.2,
+        maturity=1.0, n_steps=4, model="gbm", device="cpu",
+    )
+    option = EuropeanOption(strike=100.0, maturity=cfg.maturity, kind="call")
+
+    times = torch.linspace(0.0, cfg.maturity, cfg.n_steps + 1)
+    S = torch.full((3, cfg.n_steps + 1), 100.0, requires_grad=True)
+    paths = Paths(S=S, V=None, dt=cfg.dt, times=times)
+
+    marks = mark_option(cfg, paths, option)
+    marks.sum().backward()
+
+    assert S.grad is not None
+    assert torch.isfinite(S.grad).all()
+    # in-the-money / ATM call mark increases with spot -> positive sensitivity pre-expiry
+    assert (S.grad[:, 0] > 0).all()
+
+
+def test_mark_option_tau_clamped_when_option_matures_before_horizon():
+    # A hedge option maturing at T/2 must have tau=0 (intrinsic) for all later nodes.
+    cfg = ExperimentConfig(
+        s0=100.0, k=100.0, r=0.0, q=0.0, sigma=0.2,
+        maturity=1.0, n_steps=10, model="gbm", device="cpu",
+    )
+    option = EuropeanOption(strike=100.0, maturity=0.5, kind="call")
+    paths = _gbm_paths(cfg, n_paths=32, seed=3)
+
+    marks = mark_option(cfg, paths, option)
+
+    # nodes with t_i >= 0.5 have tau=0 -> mark equals intrinsic payoff exactly-ish
+    late = paths.times >= 0.5
+    intrinsic_late = payoff(option, paths.S[:, late])
+    assert torch.allclose(marks[:, late], intrinsic_late, atol=1e-4)
+    # an early node (t=0, tau=0.5) is worth strictly more than intrinsic (time value)
+    assert (marks[:, 0] > payoff(option, paths.S[:, 0]) - 1e-6).all()
+    assert marks[:, 0].mean() > payoff(option, paths.S[:, 0]).mean()
