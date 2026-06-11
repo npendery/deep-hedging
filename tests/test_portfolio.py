@@ -107,3 +107,44 @@ def test_simulate_pnl_shapes():
     assert res.turnover.shape == (5,)
     assert res.cost.shape == (5,)
     assert res.holdings.shape == (5, 7, 1)
+
+
+def _hold_one_then_two(state):
+    # step 0: from prev (0) -> 1 ; steps>=1: hold 2  (one further trade at step 1)
+    if state.step == 0:
+        return torch.ones_like(state.prev_holdings)
+    return 2.0 * torch.ones_like(state.prev_holdings)
+
+
+def test_simulate_pnl_proportional_cost_exact():
+    # Two trades happen: step0 |1-0|=1 priced at S_0; step1 |2-1|=1 priced at S_1.
+    # Steps 2..N-1 trade |2-2|=0 -> no further cost.
+    cfg = ExperimentConfig(
+        n_steps=4, n_paths=3, cost=0.01, instruments=("underlying",)
+    )
+    gen = torch.Generator().manual_seed(7)
+    paths = simulate_gbm(cfg, n_paths=3, generator=gen)
+    option = EuropeanOption(strike=cfg.k, maturity=cfg.maturity, kind="call")
+    instr = build_instr_prices(cfg, paths, option)
+    res = simulate_pnl(_hold_one_then_two, paths, cfg, option, 0.0, instr)
+
+    S0 = paths.S[:, 0]
+    S1 = paths.S[:, 1]
+    expected_cost = cfg.cost * (S0 * 1.0 + S1 * 1.0)
+    assert torch.allclose(res.cost, expected_cost, atol=1e-5)
+    # turnover counts |Δδ| summed over steps: 1 (step0) + 1 (step1) = 2 per path
+    assert torch.allclose(res.turnover, torch.full((3,), 2.0), atol=1e-6)
+
+
+def test_simulate_pnl_no_cost_when_rate_zero():
+    cfg = ExperimentConfig(
+        n_steps=4, n_paths=3, cost=0.0, instruments=("underlying",)
+    )
+    gen = torch.Generator().manual_seed(7)
+    paths = simulate_gbm(cfg, n_paths=3, generator=gen)
+    option = EuropeanOption(strike=cfg.k, maturity=cfg.maturity, kind="call")
+    instr = build_instr_prices(cfg, paths, option)
+    res = simulate_pnl(_hold_one_then_two, paths, cfg, option, 0.0, instr)
+    assert torch.allclose(res.cost, torch.zeros(3), atol=1e-7)
+    # turnover is independent of the cost rate
+    assert torch.allclose(res.turnover, torch.full((3,), 2.0), atol=1e-6)
