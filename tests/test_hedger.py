@@ -72,3 +72,36 @@ def test_hedger_forward_shape():
     # No output activation: holdings are unbounded reals (not squashed to [-1,1] etc.).
     # A linear final layer on random input should not be bounded; just assert finiteness.
     assert torch.isfinite(holdings).all()
+
+
+def test_hedger_shared_weights_param_count_independent_of_n_steps():
+    torch.manual_seed(0)
+    n_features, n_instruments = 4, 1
+    hedger = Hedger(n_features=n_features, n_instruments=n_instruments, hidden=(32, 32))
+
+    # Same module applied at every step. Parameter count must not grow with n_steps.
+    def total_params(module):
+        return sum(p.numel() for p in module.parameters())
+
+    base = total_params(hedger)
+
+    # Roll the SAME module forward over varying horizons; collect the param sets each time.
+    param_ids_by_horizon = {}
+    for n_steps in (1, 5, 30):
+        feats = torch.randn(8, n_features)
+        for _ in range(n_steps):
+            _ = hedger.forward(feats)  # reuses identical parameters at every step
+        param_ids_by_horizon[n_steps] = {id(p) for p in hedger.parameters()}
+        # Param count is invariant to how many steps we applied the module.
+        assert total_params(hedger) == base
+
+    # The exact same parameter tensors are reused across all horizons (true weight sharing).
+    assert param_ids_by_horizon[1] == param_ids_by_horizon[5] == param_ids_by_horizon[30]
+
+    # Concrete expected count for hidden=(32,32): a 4->32->32->1 MLP.
+    #   layer1: 4*32 + 32   = 160
+    #   layer2: 32*32 + 32  = 1056
+    #   out:    32*1  + 1   = 33
+    #   total               = 1249
+    assert base == 4 * 32 + 32 + 32 * 32 + 32 + 32 * 1 + 1
+    assert base == 1249
