@@ -3,7 +3,8 @@ import torch
 from deephedge.config import ExperimentConfig
 from deephedge.simulators.gbm import simulate_gbm
 from deephedge.instruments import EuropeanOption
-from deephedge.portfolio import StepState, PnLResult, build_instr_prices
+from deephedge.instruments import payoff
+from deephedge.portfolio import StepState, PnLResult, build_instr_prices, simulate_pnl
 
 
 def test_step_state_holds_fields():
@@ -61,3 +62,48 @@ def test_build_instr_prices_option_branch_not_implemented():
     except NotImplementedError:
         raised = True
     assert raised, "option leg must raise NotImplementedError in this section"
+
+
+def _constant_unit_strategy(state):
+    # always hold exactly 1 unit of every instrument
+    return torch.ones_like(state.prev_holdings)
+
+
+def test_simulate_pnl_mtm_telescopes_no_cost():
+    # With cost=0 and a constant unit holding in the underlying only, the MTM
+    # sum telescopes to (S_N - S_0). So pnl = premium + (S_N - S_0) - payoff.
+    cfg = ExperimentConfig(
+        n_steps=10, n_paths=16, cost=0.0, instruments=("underlying",)
+    )
+    gen = torch.Generator().manual_seed(1)
+    paths = simulate_gbm(cfg, n_paths=16, generator=gen)
+    option = EuropeanOption(strike=cfg.k, maturity=cfg.maturity, kind="call")
+    instr = build_instr_prices(cfg, paths, option)
+    premium = 3.5
+    res = simulate_pnl(
+        _constant_unit_strategy, paths, cfg, option, premium, instr
+    )
+    S0 = paths.S[:, 0]
+    S_N = paths.S[:, -1]
+    expected = premium + (S_N - S0) - payoff(option, S_N)
+    assert res.pnl.shape == (16,)
+    assert torch.allclose(res.pnl, expected, atol=1e-5)
+    # zero cost with cost=0
+    assert torch.allclose(res.cost, torch.zeros(16), atol=1e-7)
+    # holdings record: (n_paths, n_steps, n_instruments)
+    assert res.holdings.shape == (16, cfg.n_steps, 1)
+
+
+def test_simulate_pnl_shapes():
+    cfg = ExperimentConfig(
+        n_steps=7, n_paths=5, cost=0.0, instruments=("underlying",)
+    )
+    gen = torch.Generator().manual_seed(2)
+    paths = simulate_gbm(cfg, n_paths=5, generator=gen)
+    option = EuropeanOption(strike=cfg.k, maturity=cfg.maturity, kind="call")
+    instr = build_instr_prices(cfg, paths, option)
+    res = simulate_pnl(_constant_unit_strategy, paths, cfg, option, 1.0, instr)
+    assert res.pnl.shape == (5,)
+    assert res.turnover.shape == (5,)
+    assert res.cost.shape == (5,)
+    assert res.holdings.shape == (5, 7, 1)
