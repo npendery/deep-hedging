@@ -82,3 +82,32 @@ def test_entropic_equals_mean_form_identity():
     # The sum form (no -log N) must differ by exactly (1/lam)*log(N).
     sum_form = (1.0 / lam) * torch.logsumexp(-lam * pnl, dim=0)
     assert abs(float(sum_form - impl) - (1.0 / lam) * math.log(n)) < 1e-6
+
+
+def test_losses_are_differentiable_through_pnl_parameter():
+    gen = torch.Generator().manual_seed(4)
+    n = 20_000
+    base = torch.randn(n, generator=gen)
+
+    # CVaR: pnl = theta * base ; w is a separate learnable scalar.
+    theta_cvar = torch.nn.Parameter(torch.tensor(1.0))
+    w = torch.nn.Parameter(torch.tensor(1.6))
+    pnl_cvar = theta_cvar * base
+    loss_cvar = cvar_loss(pnl_cvar, 0.95, w)
+    loss_cvar.backward()
+    assert theta_cvar.grad is not None and torch.isfinite(theta_cvar.grad)
+    assert w.grad is not None and torch.isfinite(w.grad)
+    # d/dw F = 1 - (1/(1-alpha)) * P(L > w). At w below the 0.95 loss-quantile the tail
+    # mass exceeds (1-alpha), so the gradient w.r.t. w is negative (lower w not optimal).
+    assert float(w.grad) < 0.0
+
+    # Entropic: pnl = theta * base + shift ; gradient w.r.t. an additive shift is -1.
+    theta_ent = torch.nn.Parameter(torch.tensor(0.5))
+    shift = torch.nn.Parameter(torch.tensor(0.0))
+    pnl_ent = theta_ent * base + shift
+    loss_ent = entropic_loss(pnl_ent, lam=1.0)
+    loss_ent.backward()
+    assert theta_ent.grad is not None and torch.isfinite(theta_ent.grad)
+    assert shift.grad is not None and torch.isfinite(shift.grad)
+    # entropic_loss(pnl + c) = entropic_loss(pnl) - c  =>  d(loss)/d(shift) = -1.
+    assert abs(float(shift.grad) - (-1.0)) < 1e-4
