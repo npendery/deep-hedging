@@ -30,7 +30,7 @@ class PnLResult:
 
 from deephedge.simulators.base import Paths  # noqa: E402
 from deephedge.config import ExperimentConfig  # noqa: E402
-from deephedge.instruments import EuropeanOption  # noqa: E402
+from deephedge.instruments import EuropeanOption, mark_option  # noqa: E402
 
 
 def build_instr_prices(
@@ -38,23 +38,22 @@ def build_instr_prices(
 ) -> torch.Tensor:
     """Stack hedging-instrument prices into ``(n_paths, n_steps+1, n_instruments)``.
 
-    Column 0 is always the underlying ``paths.S`` (col tensor shape ``(..., 1)`` in the
-    underlying-only case). ``hedge_option`` is the HEDGE instrument's option (its own
-    strike/maturity), NOT the sold/liability option. If ``"option"`` is in
-    ``cfg.instruments`` the option leg is marked by the multi-instrument section; here it
-    raises ``NotImplementedError`` so the contract surface is stable.
+    ``hedge_option`` is the HEDGE instrument's option (its own strike/maturity), NOT the
+    sold/liability option. Column j corresponds to cfg.instruments[j]:
+      - "underlying": the spot path paths.S
+      - "option":     the marked hedge-option price mark_option(cfg, paths, hedge_option)
     """
-    n_paths, n_steps_p1 = paths.S.shape
-    cols = [paths.S]  # col 0 = underlying
-    for name in cfg.instruments[1:]:
-        if name == "option":
-            # Filled by the multi-instrument section: mark the HEDGE option leg each
-            # step via mark_option(cfg, paths, hedge_option). Deferred here.
-            raise NotImplementedError(
-                "option hedging instrument is implemented by the "
-                "multi-instrument section (use mark_option to fill this branch)"
+    cols = []
+    for name in cfg.instruments:
+        if name == "underlying":
+            cols.append(paths.S)
+        elif name == "option":
+            cols.append(mark_option(cfg, paths, hedge_option))
+        else:
+            raise ValueError(
+                f"unknown hedging instrument {name!r}; "
+                "expected 'underlying' or 'option'"
             )
-        raise ValueError(f"unknown hedging instrument: {name!r}")
     out = torch.stack(cols, dim=-1)  # (n_paths, n_steps+1, n_instruments)
     return out.to(cfg.device)
 
