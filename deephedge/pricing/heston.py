@@ -72,3 +72,33 @@ def heston_price_cm(cfg: ExperimentConfig, K: float, tau: float, kind: str = "ca
         fwd = cfg.s0 * np.exp(-cfg.q * tau) - K * np.exp(-cfg.r * tau)
         return float(call - fwd)
     raise ValueError(f"kind must be 'call' or 'put', got {kind!r}")
+
+
+def _heston_P1(cfg: ExperimentConfig, K: float, tau: float, n_grid: int = 4096) -> float:
+    """In-the-money delta probability P1 via Gil-Pelaez under the share measure.
+
+    P1 = 1/2 + (1/pi) * integral_0^inf Re[ exp(-i*v*lnK) * phi(v - i) / (i*v*phi(-i)) ] dv
+    where phi(-i) = forward = s0*exp((r-q)*tau).
+    """
+    lnK = np.log(K)
+    v = np.linspace(1e-8, 200.0, n_grid)
+    fwd_cf = heston_char_func(np.array([-1j]), cfg, tau)[0]   # phi(-i) = forward
+    num = heston_char_func(v - 1j, cfg, tau)
+    integrand = np.real(np.exp(-1j * v * lnK) * num / (1j * v * fwd_cf))
+    integral = np.trapezoid(integrand, v)
+    return float(0.5 + integral / np.pi)
+
+
+def heston_delta(cfg: ExperimentConfig, K: float, tau: float, kind: str = "call") -> float:
+    """Heston European delta = exp(-q*tau) * P1 (call). Put via parity.
+
+    Other greeks (gamma, vega-to-v0/theta/xi, theta) are obtained by central-difference
+    bumping of `heston_price_cm` (relative bump ~1e-4); only delta is closed-form here.
+    """
+    P1 = _heston_P1(cfg, K, tau)
+    call_delta = np.exp(-cfg.q * tau) * P1
+    if kind == "call":
+        return float(call_delta)
+    if kind == "put":
+        return float(call_delta - np.exp(-cfg.q * tau))   # parity: put_d = call_d - e^{-q*tau}
+    raise ValueError(f"kind must be 'call' or 'put', got {kind!r}")

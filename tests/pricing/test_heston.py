@@ -1,11 +1,13 @@
 # tests/pricing/test_heston.py
+from dataclasses import replace
+
 import numpy as np
 import pytest
 import torch
 
 from deephedge.config import ExperimentConfig
-from deephedge.pricing.black_scholes import bs_price
-from deephedge.pricing.heston import heston_char_func, heston_price_cm
+from deephedge.pricing.black_scholes import bs_delta, bs_price
+from deephedge.pricing.heston import heston_char_func, heston_delta, heston_price_cm
 
 
 def _cfg(**kw):
@@ -82,3 +84,35 @@ def test_cm_put_call_parity(K, tau):
     fwd = cfg.s0 * np.exp(-cfg.q * tau) - K * np.exp(-cfg.r * tau)
     # C - P == s0*exp(-q*tau) - K*exp(-r*tau)
     assert (call - put) == pytest.approx(fwd, abs=1e-9)
+
+
+def test_delta_matches_central_difference_of_cm_price():
+    cfg = _cfg(r=0.02, q=0.0, xi=0.4)
+    K, tau = 100.0, 0.5
+    h = cfg.s0 * 1e-4
+    up = heston_price_cm(replace(cfg, s0=cfg.s0 + h), K=K, tau=tau, kind="call")
+    dn = heston_price_cm(replace(cfg, s0=cfg.s0 - h), K=K, tau=tau, kind="call")
+    fd = (up - dn) / (2 * h)
+    ana = heston_delta(cfg, K=K, tau=tau, kind="call")
+    assert ana == pytest.approx(fd, abs=2e-3)
+    assert 0.0 < ana < 1.0  # call delta in (0,1)
+
+
+def test_delta_converges_to_bs_delta_as_xi_to_zero():
+    cfg = _cfg(v0=0.04, theta=0.04, xi=1e-6, r=0.0, q=0.0)
+    K, tau = 100.0, 0.5
+    ana = heston_delta(cfg, K=K, tau=tau, kind="call")
+    bs = bs_delta(
+        torch.tensor(cfg.s0), torch.tensor(K), torch.tensor(tau),
+        cfg.r, np.sqrt(cfg.v0), q=cfg.q, kind="call",
+    ).item()
+    assert ana == pytest.approx(bs, abs=1e-2)
+
+
+def test_delta_put_via_parity():
+    # put delta = call delta - exp(-q*tau)
+    cfg = _cfg(r=0.02, q=0.01)
+    K, tau = 100.0, 0.5
+    call_d = heston_delta(cfg, K=K, tau=tau, kind="call")
+    put_d = heston_delta(cfg, K=K, tau=tau, kind="put")
+    assert (call_d - put_d) == pytest.approx(np.exp(-cfg.q * tau), abs=1e-9)
