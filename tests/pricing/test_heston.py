@@ -71,3 +71,14 @@ def test_cm_call_is_positive_and_bounded():
     cfg = _cfg()
     price = heston_price_cm(cfg, K=100.0, tau=0.5, kind="call")
     assert 0.0 < price < cfg.s0
+
+
+@pytest.mark.parametrize("K", [80.0, 100.0, 120.0])
+@pytest.mark.parametrize("tau", [0.25, 1.0])
+def test_cm_put_call_parity(K, tau):
+    cfg = _cfg(r=0.03, q=0.01)
+    call = heston_price_cm(cfg, K=K, tau=tau, kind="call")
+    put = heston_price_cm(cfg, K=K, tau=tau, kind="put")
+    fwd = cfg.s0 * np.exp(-cfg.q * tau) - K * np.exp(-cfg.r * tau)
+    # C - P == s0*exp(-q*tau) - K*exp(-r*tau)
+    assert (call - put) == pytest.approx(fwd, abs=1e-9)
