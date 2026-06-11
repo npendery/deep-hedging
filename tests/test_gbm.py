@@ -86,3 +86,23 @@ def test_gbm_martingale_discounted_mean():
     assert torch.abs(mc_mean - cfg.s0) <= 3.0 * mc_stderr
     # stderr is small at this n_paths (sigma=0.2,T=1 => std(S_T)~20 => stderr~0.045)
     assert mc_stderr < 0.1
+
+
+def test_gbm_terminal_log_variance_matches_sigma2T():
+    cfg = ExperimentConfig(s0=100.0, sigma=0.2, r=0.0, mu=None, maturity=1.0, n_steps=50)
+    gen = torch.Generator(device=cfg.device).manual_seed(7)
+    n_paths = 200_000
+
+    paths = simulate_gbm(cfg, n_paths, gen)
+    log_ret = torch.log(paths.S[:, -1] / cfg.s0)
+
+    sample_var = log_ret.var(unbiased=True)
+    expected_var = cfg.sigma ** 2 * cfg.maturity  # 0.2**2 * 1.0 = 0.04
+
+    # within ~3% relative (MC variance-of-variance is ~0.32% rel at this n_paths)
+    assert torch.isclose(sample_var, torch.tensor(expected_var), rtol=0.03)
+
+    # log-return mean should match (drift - 0.5*sigma^2)*T = -0.02
+    expected_mean = (cfg.drift - 0.5 * cfg.sigma ** 2) * cfg.maturity
+    mean_stderr = (sample_var / n_paths) ** 0.5
+    assert torch.abs(log_ret.mean() - expected_mean) <= 4.0 * mean_stderr
