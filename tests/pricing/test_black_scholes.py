@@ -162,3 +162,32 @@ def test_tau_zero_vector_no_nan_mixed_moneyness():
     # Each price equals intrinsic value max(S-K,0) at expiry.
     intrinsic = torch.clamp(S - K, min=0.0)
     assert torch.allclose(price, intrinsic, atol=1e-5)
+
+
+def test_broadcasting_tensor_tau_and_scalar_consistency():
+    # tau as a tensor (per-step expiries) must broadcast against a vector of spots,
+    # and agree element-wise with scalar-tau calls.
+    gen = torch.Generator().manual_seed(123)
+    S = 80.0 + 40.0 * torch.rand(5, generator=gen)
+    K = torch.tensor(100.0)
+    taus = torch.tensor([1.0, 0.75, 0.5, 0.25, 0.1])
+    r, sigma = 0.01, 0.2
+    vec_price = bs_price(S, K, taus, r, sigma, kind="call")
+    assert vec_price.shape == (5,)
+    for i in range(5):
+        scalar = bs_price(S[i], K, float(taus[i]), r, sigma, kind="call")
+        assert torch.allclose(vec_price[i], scalar, atol=1e-6)
+
+
+def test_full_suite_no_nan_across_functions():
+    # Smoke matrix: every function finite over a grid of moneyness x tau (incl. 0).
+    gen = torch.Generator().manual_seed(99)
+    S = 40.0 + 120.0 * torch.rand(32, generator=gen)
+    K = torch.tensor(100.0)
+    for tau in (0.0, 1e-9, 0.05, 1.0, 2.5):
+        for kind in ("call", "put"):
+            assert torch.isfinite(bs_price(S, K, tau, 0.01, 0.2, kind=kind)).all()
+            assert torch.isfinite(bs_delta(S, K, tau, 0.01, 0.2, kind=kind)).all()
+            assert torch.isfinite(bs_theta(S, K, tau, 0.01, 0.2, kind=kind)).all()
+        assert torch.isfinite(bs_vega(S, K, tau, 0.01, 0.2)).all()
+        assert torch.isfinite(bs_gamma(S, K, tau, 0.01, 0.2)).all()
