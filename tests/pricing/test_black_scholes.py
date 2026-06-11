@@ -2,7 +2,7 @@ import math
 
 import torch
 
-from deephedge.pricing.black_scholes import _d1_d2, bs_price
+from deephedge.pricing.black_scholes import _d1_d2, bs_price, bs_delta
 
 
 def test_d1_d2_atm_unit_vol_one_year():
@@ -34,3 +34,30 @@ def test_put_call_parity():
     lhs = call - put
     rhs = S * math.exp(-q * tau) - K * math.exp(-r * tau)
     assert torch.allclose(lhs, rhs, atol=1e-5)
+
+
+def test_call_delta_atm_half_boundary():
+    # ATM r=q=0 sigma=0.2 tau=1 -> delta = N(0.1) ~ 0.5398
+    S = torch.tensor(100.0)
+    K = torch.tensor(100.0)
+    delta = bs_delta(S, K, 1.0, 0.0, 0.2, kind="call")
+    assert torch.allclose(delta, torch.tensor(0.5398), atol=1e-3)
+
+
+def test_call_delta_deep_itm_and_otm():
+    K = torch.tensor(100.0)
+    r, sigma, tau = 0.0, 0.2, 1.0
+    itm = bs_delta(torch.tensor(1000.0), K, tau, r, sigma, kind="call")
+    otm = bs_delta(torch.tensor(1.0), K, tau, r, sigma, kind="call")
+    assert itm.item() > 0.999            # deep ITM call delta -> 1
+    assert otm.item() < 1e-3             # deep OTM call delta -> 0
+
+
+def test_put_delta_equals_call_delta_minus_one():
+    # With q=0: put delta = call delta - 1 (= -N(-d1)).
+    S = torch.tensor(100.0)
+    K = torch.tensor(100.0)
+    r, sigma, tau = 0.0, 0.2, 1.0
+    cd = bs_delta(S, K, tau, r, sigma, kind="call")
+    pd = bs_delta(S, K, tau, r, sigma, kind="put")
+    assert torch.allclose(pd, cd - 1.0, atol=1e-6)
