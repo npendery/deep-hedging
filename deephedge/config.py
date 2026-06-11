@@ -43,3 +43,15 @@ class ExperimentConfig:
     lr: float = 1e-3
     seed: int = 0
     device: str = "cpu"
+
+    @property
+    def dt(self) -> float:
+        return self.maturity / self.n_steps
+
+    @property
+    def drift(self) -> float:
+        return self.r if self.mu is None else self.mu
+
+    @property
+    def n_instruments(self) -> int:
+        return len(self.instruments)
