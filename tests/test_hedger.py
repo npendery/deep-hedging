@@ -54,3 +54,21 @@ def test_build_features_width_with_variance_and_two_instruments():
     # column 4: sqrt(clamp(V_i, 0)) -> sqrt(0.04)=0.2 ; clamped negative -> 0.0
     assert math.isclose(feats[0, 4].item(), 0.2, rel_tol=1e-6)
     assert feats[1, 4].item() == 0.0
+
+
+from deephedge.hedger import Hedger
+
+
+def test_hedger_forward_shape():
+    torch.manual_seed(0)
+    n_features, n_instruments, B = 4, 2, 7
+    hedger = Hedger(n_features=n_features, n_instruments=n_instruments, hidden=(32, 32))
+    features = torch.randn(B, n_features)
+
+    holdings = hedger.forward(features)
+
+    assert holdings.shape == (B, n_instruments)
+    assert holdings.dtype == features.dtype
+    # No output activation: holdings are unbounded reals (not squashed to [-1,1] etc.).
+    # A linear final layer on random input should not be bounded; just assert finiteness.
+    assert torch.isfinite(holdings).all()
