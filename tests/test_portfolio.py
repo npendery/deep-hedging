@@ -49,20 +49,6 @@ def test_build_instr_prices_underlying_only_is_S():
     assert torch.equal(prices[:, :, 0], paths.S)
 
 
-def test_build_instr_prices_option_branch_not_implemented():
-    cfg = ExperimentConfig(
-        n_steps=5, n_paths=8, instruments=("underlying", "option")
-    )
-    gen = torch.Generator().manual_seed(0)
-    paths = simulate_gbm(cfg, n_paths=8, generator=gen)
-    option = EuropeanOption(strike=cfg.k, maturity=cfg.maturity, kind="call")
-    try:
-        build_instr_prices(cfg, paths, option)
-        raised = False
-    except NotImplementedError:
-        raised = True
-    assert raised, "option leg must raise NotImplementedError in this section"
-
 
 def _constant_unit_strategy(state):
     # always hold exactly 1 unit of every instrument
