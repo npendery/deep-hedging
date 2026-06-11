@@ -176,6 +176,7 @@ def test_simulate_merton_matches_closed_form_call():
 # Task 9.5: simulate_merton reduces to simulate_gbm when jump_intensity=0
 # ---------------------------------------------------------------------------
 
+from deephedge.simulators.base import get_simulator
 from deephedge.simulators.gbm import simulate_gbm
 from deephedge.simulators.jumps import simulate_bates
 
@@ -245,3 +246,33 @@ def test_simulate_bates_martingale_with_compensator():
     stderr = (S_T.std(unbiased=True) / (n_paths ** 0.5)).item()
     # r=0 -> discount factor 1; mean must sit within ~3*stderr of s0.
     assert abs(mean_ST - cfg.s0) < 3 * stderr
+
+
+# ---------------------------------------------------------------------------
+# Task 9.8: get_simulator resolves "merton" and "bates"
+# ---------------------------------------------------------------------------
+
+def test_get_simulator_registers_merton_and_bates():
+    g = torch.Generator().manual_seed(0)
+
+    cfg_m = ExperimentConfig(
+        model="merton", s0=100.0, sigma=0.2, maturity=1.0, n_steps=20,
+        jump_intensity=2.0, jump_mean=-0.1, jump_std=0.15,
+    )
+    sim_m = get_simulator("merton")
+    paths_m = sim_m(cfg_m, 1_000, g)
+    assert paths_m.S.shape == (1_000, cfg_m.n_steps + 1)
+    assert paths_m.V is None
+    # Same callable identity as the direct function.
+    assert sim_m is simulate_merton
+
+    cfg_b = ExperimentConfig(
+        model="bates", s0=100.0, maturity=1.0, n_steps=20,
+        v0=0.04, kappa=1.5, theta=0.04, xi=0.5, rho=-0.7,
+        jump_intensity=2.0, jump_mean=-0.1, jump_std=0.15,
+    )
+    sim_b = get_simulator("bates")
+    paths_b = sim_b(cfg_b, 1_000, g)
+    assert paths_b.S.shape == (1_000, cfg_b.n_steps + 1)
+    assert paths_b.V is not None and paths_b.V.shape == (1_000, cfg_b.n_steps + 1)
+    assert sim_b is simulate_bates
