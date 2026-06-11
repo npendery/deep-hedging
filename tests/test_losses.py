@@ -32,3 +32,22 @@ def test_cvar_loss_matches_gaussian_closed_form_at_optimal_w():
     # cvar_loss returns a scalar tensor.
     out = cvar_loss(pnl, alpha, torch.tensor(z))
     assert out.shape == torch.Size([])
+
+
+def test_cvar_geq_var_geq_expected_loss():
+    gen = torch.Generator().manual_seed(1)
+    n = 200_000
+    # Skewed, profit-positive P&L: mostly small positive, with a fat left tail (losses).
+    pnl = 0.5 - torch.relu(torch.randn(n, generator=gen)) ** 2
+    alpha = 0.95
+    loss = -pnl
+
+    var = torch.quantile(loss, alpha)            # VaR_alpha of the loss
+    expected_loss = loss.mean()                  # E[L]
+    cvar = cvar_loss(pnl, alpha, var)            # CVaR_alpha = F(w=VaR)
+
+    assert float(cvar) >= float(var) - 1e-4
+    assert float(var) >= float(expected_loss) - 1e-4
+    # Tail is genuinely heavier than the mean: strict gaps on this skewed sample.
+    assert float(cvar) > float(var)
+    assert float(var) > float(expected_loss)
