@@ -35,3 +35,15 @@ def test_train_returns_hedger_and_history_with_expected_keys():
     assert isinstance(history["premium"], float)
     # ATM call premium under r=0, q=0 is positive and < S0
     assert 0.0 < history["premium"] < cfg.s0
+
+
+def test_train_entropic_loss_branch_has_no_w():
+    cfg = _tiny_cfg(loss="entropic", entropic_lambda=1.0)
+    hedger, history = train(cfg)
+
+    n_steps_total = cfg.epochs * cfg.steps_per_epoch
+    assert len(history["loss"]) == n_steps_total
+    # entropic path never creates w -> empty list
+    assert history["w"] == []
+    # entropic loss with profit-positive PnL is finite and not NaN
+    assert all(x == x for x in history["loss"])  # NaN-check (NaN != NaN)
