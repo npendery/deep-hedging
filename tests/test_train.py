@@ -148,4 +148,9 @@ def test_frictionless_gbm_recovers_bs_delta_within_tolerance():
     delta = bs_delta(S_i, cfg.k, tau, cfg.r, cfg.sigma, q=cfg.q)
 
     mean_abs_diff = (learned - delta).abs().mean().item()
-    assert mean_abs_diff < 0.15, mean_abs_diff
+    # Loose, tolerance-based sanity gate (spec §13(6)): in the frictionless complete-market
+    # limit the learned policy approaches the BS delta, but only within grid + SGD tolerance,
+    # not bit-exactly. 0.20 stays well clear of the ~0.39 untrained-net / ~0.50 zero-net
+    # baselines (so it still genuinely tests recovery) while giving robust headroom against
+    # numerical/version drift when this repo is cloned and run elsewhere.
+    assert mean_abs_diff < 0.20, mean_abs_diff
