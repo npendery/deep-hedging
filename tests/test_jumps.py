@@ -276,3 +276,27 @@ def test_get_simulator_registers_merton_and_bates():
     assert paths_b.S.shape == (1_000, cfg_b.n_steps + 1)
     assert paths_b.V is not None and paths_b.V.shape == (1_000, cfg_b.n_steps + 1)
     assert sim_b is simulate_bates
+
+
+# ---------------------------------------------------------------------------
+# Task 9.9: Device-agnostic sanity
+# ---------------------------------------------------------------------------
+
+def test_jump_simulators_respect_cfg_device():
+    cfg = ExperimentConfig(
+        model="merton", device="cpu", s0=100.0, sigma=0.2, maturity=0.5, n_steps=10,
+        jump_intensity=1.0, jump_mean=-0.05, jump_std=0.1,
+    )
+    g = torch.Generator().manual_seed(3)
+    pm = simulate_merton(cfg, 256, g)
+    assert pm.S.device.type == "cpu"
+    assert pm.times.device.type == "cpu"
+
+    cfg_b = ExperimentConfig(
+        model="bates", device="cpu", s0=100.0, maturity=0.5, n_steps=10,
+        v0=0.04, kappa=1.5, theta=0.04, xi=0.5, rho=-0.7,
+        jump_intensity=1.0, jump_mean=-0.05, jump_std=0.1,
+    )
+    pb = simulate_bates(cfg_b, 256, g)
+    assert pb.S.device.type == "cpu"
+    assert pb.V.device.type == "cpu"
