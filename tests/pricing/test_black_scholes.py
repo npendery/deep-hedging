@@ -2,7 +2,7 @@ import math
 
 import torch
 
-from deephedge.pricing.black_scholes import _d1_d2, bs_price, bs_delta, bs_gamma, bs_vega
+from deephedge.pricing.black_scholes import _d1_d2, bs_price, bs_delta, bs_gamma, bs_vega, bs_theta
 
 
 def test_d1_d2_atm_unit_vol_one_year():
@@ -89,3 +89,26 @@ def test_vega_gamma_relation():
     vega = bs_vega(S, K, tau, r, sigma)
     gamma = bs_gamma(S, K, tau, r, sigma)
     assert torch.allclose(vega, gamma * S * S * sigma * tau, atol=1e-4)
+
+
+def test_call_theta_atm_known_value():
+    # ATM r=q=0 sigma=0.2 tau=1: theta = -S*phi(d1)*sigma/(2*sqrt(tau)) = -3.969525
+    S = torch.tensor(100.0)
+    K = torch.tensor(100.0)
+    theta = bs_theta(S, K, 1.0, 0.0, 0.2, kind="call")
+    assert torch.allclose(theta, torch.tensor(-3.969525), atol=1e-4)
+    assert theta.item() < 0.0   # long call loses value as time passes (r=q=0)
+
+
+def test_theta_matches_finite_difference():
+    # theta = d(price)/d(t) = -d(price)/d(tau); central difference in tau.
+    # h=1e-2 chosen for float32 accuracy (h=1e-4 loses precision in float32 subtraction).
+    S = torch.tensor(105.0)
+    K = torch.tensor(100.0)
+    r, sigma, tau, q = 0.02, 0.25, 0.5, 0.0
+    h = 1e-2
+    up = bs_price(S, K, tau + h, r, sigma, q=q, kind="call")
+    dn = bs_price(S, K, tau - h, r, sigma, q=q, kind="call")
+    fd_theta = -(up - dn) / (2 * h)
+    theta = bs_theta(S, K, tau, r, sigma, q=q, kind="call")
+    assert torch.allclose(theta, fd_theta, atol=1e-2)
