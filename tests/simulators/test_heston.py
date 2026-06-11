@@ -40,3 +40,22 @@ def test_shapes_and_initial_conditions():
     # finite everywhere
     assert torch.isfinite(paths.S).all()
     assert torch.isfinite(paths.V).all()
+
+
+def test_reproducibility_same_seed_same_paths():
+    cfg = _cfg(n_steps=20)
+    n_paths = 500
+
+    gen_a = torch.Generator(device="cpu").manual_seed(1234)
+    gen_b = torch.Generator(device="cpu").manual_seed(1234)
+    paths_a = simulate_heston(cfg, n_paths, gen_a)
+    paths_b = simulate_heston(cfg, n_paths, gen_b)
+
+    assert torch.equal(paths_a.S, paths_b.S)
+    assert torch.equal(paths_a.V, paths_b.V)
+
+    # A different seed must produce different paths (beyond the fixed t=0 column).
+    gen_c = torch.Generator(device="cpu").manual_seed(9999)
+    paths_c = simulate_heston(cfg, n_paths, gen_c)
+    assert not torch.equal(paths_a.S[:, 1:], paths_c.S[:, 1:])
+    assert not torch.equal(paths_a.V[:, 1:], paths_c.V[:, 1:])
