@@ -66,3 +66,19 @@ def test_entropic_small_lambda_limit_recovers_negative_mean_pnl():
 
     assert val.shape == torch.Size([])
     assert abs(float(val) - float(neg_mean)) < 1e-3
+
+
+def test_entropic_equals_mean_form_identity():
+    gen = torch.Generator().manual_seed(3)
+    n = 50_000
+    pnl = (0.2 * torch.randn(n, generator=gen)).to(torch.float64)
+    lam = 1.0
+
+    impl = entropic_loss(pnl, lam)
+    mean_form = (1.0 / lam) * torch.log(torch.mean(torch.exp(-lam * pnl)))
+
+    assert abs(float(impl) - float(mean_form)) < 1e-5
+
+    # The sum form (no -log N) must differ by exactly (1/lam)*log(N).
+    sum_form = (1.0 / lam) * torch.logsumexp(-lam * pnl, dim=0)
+    assert abs(float(sum_form - impl) - (1.0 / lam) * math.log(n)) < 1e-6
