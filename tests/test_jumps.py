@@ -170,3 +170,34 @@ def test_simulate_merton_matches_closed_form_call():
     assert abs(mc_price - closed) < 2.58 * mc_stderr, (
         f"MC={mc_price:.4f} closed={closed:.4f} stderr={mc_stderr:.4f}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Task 9.5: simulate_merton reduces to simulate_gbm when jump_intensity=0
+# ---------------------------------------------------------------------------
+
+from deephedge.simulators.gbm import simulate_gbm
+
+
+def test_simulate_merton_zero_intensity_matches_gbm_in_distribution():
+    cfg = ExperimentConfig(
+        s0=100.0, r=0.01, mu=None, sigma=0.2, maturity=1.0, n_steps=50,
+        jump_intensity=0.0, jump_mean=-0.1, jump_std=0.15,
+    )
+    n_paths = 300_000
+    g_m = torch.Generator().manual_seed(123)
+    g_g = torch.Generator().manual_seed(123)
+    merton = simulate_merton(cfg, n_paths=n_paths, generator=g_m)
+    gbm = simulate_gbm(cfg, n_paths=n_paths, generator=g_g)
+
+    st_m = merton.S[:, -1]
+    # cast GBM (float32) to float64 for a like-dtype comparison
+    st_g = gbm.S[:, -1].to(torch.float64)
+    # Means and stds of S_T agree to <1% relative (both are the same GBM law).
+    assert abs(st_m.mean().item() - st_g.mean().item()) / st_g.mean().item() < 0.01
+    assert abs(st_m.std().item() - st_g.std().item()) / st_g.std().item() < 0.02
+    # Quantile match at the 5% and 95% tails (<1.5% relative).
+    qs = torch.tensor([0.05, 0.95], dtype=st_m.dtype)
+    qm = torch.quantile(st_m, qs)
+    qg = torch.quantile(st_g, qs)
+    assert torch.all((qm - qg).abs() / qg < 0.015)
