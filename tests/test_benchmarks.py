@@ -3,7 +3,6 @@ import torch
 from deephedge.config import ExperimentConfig
 from deephedge.simulators.gbm import simulate_gbm
 from deephedge.instruments import EuropeanOption, payoff
-from deephedge.portfolio import build_instr_prices, simulate_pnl
 from deephedge.portfolio import StepState, build_instr_prices, simulate_pnl
 from deephedge.benchmarks import make_no_hedge_strategy
 

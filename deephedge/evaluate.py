@@ -46,7 +46,7 @@ def _model_premium(cfg: ExperimentConfig, option: EuropeanOption) -> float:
     if cfg.model in _STOCH_VOL_MODELS:
         return float(heston_price_cm(cfg, option.strike, option.maturity, kind=option.kind))
     S0 = torch.tensor(cfg.s0, dtype=torch.float64, device=cfg.device)
-    return float(bs_price(S0, cfg.k, cfg.maturity, cfg.r, cfg.sigma, q=cfg.q, kind=option.kind))
+    return float(bs_price(S0, option.strike, option.maturity, cfg.r, cfg.sigma, q=cfg.q, kind=option.kind))
 
 
 def empirical_cvar(pnl: torch.Tensor, alpha: float) -> float:
@@ -186,7 +186,11 @@ def plot_hedge_ratio(cfg: ExperimentConfig, hedger, path: str) -> str:
     prev_holdings = torch.zeros(S.shape[0], cfg.n_instruments, dtype=S.dtype, device=device)
     prev_holdings[:, 0] = delta
     tau_norm = tau / cfg.maturity  # normalized time-to-maturity feature
-    feats = build_features(S, tau_norm, prev_holdings, V_i=None, k_norm=cfg.k)
+    # For stochastic-vol models the hedger expects a sqrt(V) feature; supply v0 as a
+    # representative steady-state variance (same value used at t0 during training).
+    V_i = torch.full((S.shape[0],), cfg.v0, dtype=S.dtype, device=device) \
+        if cfg.model in _STOCH_VOL_MODELS else None
+    feats = build_features(S, tau_norm, prev_holdings, V_i=V_i, k_norm=cfg.k)
     with torch.no_grad():
         learned = hedger(feats)[:, 0]  # underlying leg
 

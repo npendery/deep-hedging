@@ -17,9 +17,9 @@ def test_run_experiment_trains_evaluates_and_saves(tmp_path):
     # markdown table written to disk and returned
     assert (tmp_path / "metrics.md").exists()
     assert out["table"].startswith("|")
-    # both figures saved
-    pnl_fig = tmp_path / "pnl_distribution.png"
-    band_fig = tmp_path / "hedge_ratio.png"
+    # both figures saved with regime-prefixed names
+    pnl_fig = tmp_path / "gbm_costs_pnl_distribution.png"
+    band_fig = tmp_path / "gbm_costs_hedge_ratio.png"
     assert pnl_fig.exists() and pnl_fig.stat().st_size > 0
     assert band_fig.exists() and band_fig.stat().st_size > 0
     assert out["figures"]["pnl_distribution"] == str(pnl_fig)
@@ -36,8 +36,8 @@ def test_make_figures_writes_both_charts(tmp_path):
     )
     figs = make_figures("gbm_costs", str(tmp_path), cfg_overrides=overrides)
 
-    pnl_fig = tmp_path / "pnl_distribution.png"
-    band_fig = tmp_path / "hedge_ratio.png"
+    pnl_fig = tmp_path / "gbm_costs_pnl_distribution.png"
+    band_fig = tmp_path / "gbm_costs_hedge_ratio.png"
     assert pnl_fig.exists() and pnl_fig.stat().st_size > 0
     assert band_fig.exists() and band_fig.stat().st_size > 0
     assert figs == {"pnl_distribution": str(pnl_fig), "hedge_ratio": str(band_fig)}

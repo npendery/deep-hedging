@@ -44,7 +44,7 @@ def _premium(cfg: ExperimentConfig, option: EuropeanOption) -> float:
     if cfg.model in _STOCH_VOL_MODELS:
         return float(heston_price_cm(cfg, option.strike, option.maturity, kind=option.kind))
     S = torch.tensor(cfg.s0, dtype=torch.float64, device=cfg.device)
-    p = bs_price(S, cfg.k, option.maturity, cfg.r, cfg.sigma, q=cfg.q, kind=option.kind)
+    p = bs_price(S, option.strike, option.maturity, cfg.r, cfg.sigma, q=cfg.q, kind=option.kind)
     return float(p)
 
 

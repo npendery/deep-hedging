@@ -48,8 +48,10 @@ def mark_option(cfg, paths, option: EuropeanOption) -> torch.Tensor:
 def _mark_vol(cfg, option: EuropeanOption) -> float:
     """Volatility used to mark the option leg.
 
-    For GBM / Merton this is simply cfg.sigma. (Heston / Bates override this in Task
-    11.3 with a Heston-implied BS vol; until then they fall back to cfg.sigma.)
+    For GBM / Merton this returns cfg.sigma directly. For Heston / Bates a
+    Black-Scholes implied vol is computed once at t0 by inverting the Carr-Madan
+    Heston price via bisection (_heston_implied_vol), and the entire node grid is
+    then marked with bs_price at that frozen vol.
     """
     if cfg.model in _STOCH_VOL_MODELS:
         return _heston_implied_vol(cfg, option)
@@ -67,6 +69,10 @@ def _heston_implied_vol(cfg, option: EuropeanOption) -> float:
     single BS vol by bisection. The whole node grid is then marked with bs_price at this
     frozen vol (see mark_option). The implied vol is positive and finite for any
     arbitrage-free Heston price strictly above intrinsic.
+
+    Limitation: the frozen vol does NOT reflect the realized variance V_t at each node,
+    so the option-leg MTM along the path is an approximation, not a true per-node Heston
+    reprice.
     """
     from deephedge.pricing.heston import heston_price_cm  # lazy: avoids import cycle
 

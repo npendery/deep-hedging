@@ -24,8 +24,8 @@ def make_figures(name: str, outdir: str, *, cfg_overrides: dict | None = None) -
 
     hedger, _ = train(cfg)
 
-    pnl_path = os.path.join(outdir, "pnl_distribution.png")
-    band_path = os.path.join(outdir, "hedge_ratio.png")
+    pnl_path = os.path.join(outdir, f"{name}_pnl_distribution.png")
+    band_path = os.path.join(outdir, f"{name}_hedge_ratio.png")
     plot_pnl_distribution(_pnl_by_strategy(cfg, hedger), pnl_path)
     plot_hedge_ratio(cfg, hedger, band_path)
     return {"pnl_distribution": pnl_path, "hedge_ratio": band_path}

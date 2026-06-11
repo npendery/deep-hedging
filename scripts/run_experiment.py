@@ -18,6 +18,7 @@ from deephedge.benchmarks import (
     make_no_hedge_strategy,
 )
 from deephedge.evaluate import (
+    _EVAL_SEED_OFFSET,
     _hedge_option,
     _model_premium,
     empirical_cvar,
@@ -31,9 +32,6 @@ from deephedge.portfolio import build_instr_prices, simulate_pnl
 from deephedge.simulators.base import get_simulator
 from deephedge.train import train
 from experiments.regimes import build_regime
-
-_EVAL_SEED_OFFSET = 10_000
-
 
 def _pnl_by_strategy(cfg, hedger) -> dict:
     """Per-path P&L + CVaR_95 per strategy on the SAME fresh paths evaluate() uses.
@@ -81,8 +79,8 @@ def run_experiment(name: str, outdir: str, *, cfg_overrides: dict | None = None)
     with open(os.path.join(outdir, "metrics.md"), "w") as fh:
         fh.write(f"# Regime: {name}\n\n{table}\n")
 
-    pnl_path = os.path.join(outdir, "pnl_distribution.png")
-    band_path = os.path.join(outdir, "hedge_ratio.png")
+    pnl_path = os.path.join(outdir, f"{name}_pnl_distribution.png")
+    band_path = os.path.join(outdir, f"{name}_hedge_ratio.png")
     plot_pnl_distribution(_pnl_by_strategy(cfg, hedger), pnl_path)
     plot_hedge_ratio(cfg, hedger, band_path)
 

@@ -23,11 +23,11 @@ written to `<outdir>/metrics.md`).
 The money-shot: overlaid terminal-P&L distributions with CVaR_95 markers, showing the
 learned policy's thinner left tail under Heston + costs.
 
-![P&L distribution](pnl_distribution.png)
+![P&L distribution](figures/heston_costs_pnl_distribution.png)
 
 Learned underlying holding vs Black-Scholes delta across moneyness near expiry.
 
-![Hedge ratio vs delta](hedge_ratio.png)
+![Hedge ratio vs delta](figures/heston_costs_hedge_ratio.png)
 
 ## CVaR loss
 
