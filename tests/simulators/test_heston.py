@@ -88,3 +88,44 @@ def test_discounted_expectation_is_martingale():
         f"discounted mean {mean:.4f} not within 3.5*stderr ({3.5 * stderr:.4f}) of "
         f"s0={cfg.s0}"
     )
+
+
+def test_truncation_function_nonnegative_while_stored_state_may_be_negative():
+    # Construct a near-zero-vol, high vol-of-vol regime that strongly VIOLATES the
+    # Feller condition (2*kappa*theta >= xi^2) so the Euler increment frequently
+    # pushes the *stored* variance below zero. The full-truncation scheme must:
+    #   (a) feed only V_plus = max(V_i, 0) (>= 0) into the coefficients, so the
+    #       sqrt argument is never negative (no NaNs anywhere), and
+    #   (b) STILL allow the carried state V_{i+1} to be negative (it is NOT
+    #       truncated before being stored), per spec §5.2.
+    cfg = _cfg(
+        s0=100.0, r=0.0, mu=None,
+        maturity=1.0, n_steps=50,
+        v0=1e-4,        # start essentially at zero vol
+        kappa=0.1,      # weak mean reversion
+        theta=1e-4,     # tiny long-run variance
+        xi=1.0,         # large vol-of-vol -> 2*kappa*theta=2e-5 << xi^2=1.0
+        rho=-0.7,
+    )
+    # Feller is violated by construction.
+    assert 2 * cfg.kappa * cfg.theta < cfg.xi**2
+
+    gen = torch.Generator(device="cpu").manual_seed(42)
+    n_paths = 20_000
+    paths = simulate_heston(cfg, n_paths, gen)
+
+    # (a) No NaNs/Infs: proves sqrt was never fed a negative argument -> the
+    #     coefficient function V_plus stayed non-negative throughout.
+    assert torch.isfinite(paths.S).all()
+    assert torch.isfinite(paths.V).all()
+    # The truncated function max(V, 0) is non-negative by definition; verify the
+    # stored variance, when truncated, is a valid sqrt argument.
+    assert (paths.V.clamp(min=0.0) >= 0.0).all()
+
+    # (b) The stored state IS permitted to go negative; in this regime it does.
+    #     (If the implementation wrongly clamped the *stored* V, this fails ->
+    #      catching the absorption/reflection bug the spec warns against.)
+    assert (paths.V < 0.0).any(), (
+        "stored variance never went negative in a Feller-violating regime; "
+        "the scheme is likely truncating the carried state (wrong family)"
+    )
