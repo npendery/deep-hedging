@@ -4,7 +4,8 @@ import pytest
 import torch
 
 from deephedge.config import ExperimentConfig
-from deephedge.pricing.heston import heston_char_func
+from deephedge.pricing.black_scholes import bs_price
+from deephedge.pricing.heston import heston_char_func, heston_price_cm
 
 
 def _cfg(**kw):
@@ -51,3 +52,22 @@ def test_char_func_returns_numpy_complex_array_broadcasting():
     phi = heston_char_func(u, cfg, tau=0.5)
     assert phi.shape == (8,)
     assert phi.dtype == np.complex128
+
+
+def test_cm_call_converges_to_bs_as_xi_to_zero():
+    # xi -> 0 freezes variance near v0 (with theta == v0), so Heston -> BS(sigma=sqrt(v0)).
+    cfg = _cfg(v0=0.04, theta=0.04, xi=1e-6, kappa=1.5, rho=-0.7, r=0.0, q=0.0)
+    K, tau = 100.0, 0.5
+    price = heston_price_cm(cfg, K=K, tau=tau, kind="call")
+    bs = bs_price(
+        torch.tensor(cfg.s0), torch.tensor(K), torch.tensor(tau),
+        cfg.r, np.sqrt(cfg.v0), q=cfg.q, kind="call",
+    ).item()
+    assert price == pytest.approx(bs, abs=1e-2)
+
+
+def test_cm_call_is_positive_and_bounded():
+    # 0 < call < s0 for an ATM call with nonzero maturity.
+    cfg = _cfg()
+    price = heston_price_cm(cfg, K=100.0, tau=0.5, kind="call")
+    assert 0.0 < price < cfg.s0

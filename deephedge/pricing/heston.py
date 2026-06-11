@@ -38,3 +38,37 @@ def heston_char_func(u, cfg: ExperimentConfig, tau: float) -> np.ndarray:
     )
     phi = np.exp(C + D * v0 + 1j * u * (np.log(s0) + (r - q) * tau))
     return phi
+
+
+def _cm_call_price(cfg: ExperimentConfig, K: float, tau: float,
+                   damping: float, n_grid: int) -> float:
+    """Carr-Madan damped-call price via trapezoidal integration over v in (0, v_max]."""
+    r = cfg.r
+    lnK = np.log(K)
+    # Fine grid on (0, v_max]; start just above 0 to avoid the integrand pole at v=0.
+    v_max = 200.0
+    v = np.linspace(1e-8, v_max, n_grid)
+    # psi(v) = exp(-r*tau) * phi(v - (damping+1)i) / (damping^2 + damping - v^2 + i(2*damping+1)v)
+    phi = heston_char_func(v - (damping + 1.0) * 1j, cfg, tau)
+    denom = damping**2 + damping - v**2 + 1j * (2.0 * damping + 1.0) * v
+    psi = np.exp(-r * tau) * phi / denom
+    integrand = np.real(np.exp(-1j * v * lnK) * psi)
+    integral = np.trapezoid(integrand, v)
+    call = np.exp(-damping * lnK) / np.pi * integral
+    return float(call)
+
+
+def heston_price_cm(cfg: ExperimentConfig, K: float, tau: float, kind: str = "call",
+                    *, damping: float = 1.5, n_grid: int = 4096) -> float:
+    """Heston European price via Carr-Madan damped-call FFT/integral.
+
+    Put is obtained from the call by put-call parity.
+    """
+    call = _cm_call_price(cfg, K, tau, damping, n_grid)
+    if kind == "call":
+        return call
+    if kind == "put":
+        # parity: C - P = s0*exp(-q*tau) - K*exp(-r*tau)
+        fwd = cfg.s0 * np.exp(-cfg.q * tau) - K * np.exp(-cfg.r * tau)
+        return float(call - fwd)
+    raise ValueError(f"kind must be 'call' or 'put', got {kind!r}")
