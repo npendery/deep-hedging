@@ -85,11 +85,16 @@ def heston_price_mc(cfg: ExperimentConfig, K: float, tau: float, n_paths: int,
 
     Simulates under risk-neutral drift (mu = r) over horizon `tau` using the Heston
     full-truncation Euler simulator, then discounts the terminal European payoff.
-    The number of time steps is taken from cfg.n_steps (or uses a minimum of 30 steps
-    per year to control discretization bias when tau differs from cfg.maturity).
+
+    Discretization note: full-truncation Euler at high vol-of-vol (xi >= 0.5) can
+    produce O(1/n_steps) upward bias. We use at least 252 steps per year (business-day
+    frequency) so that the Euler bias is smaller than ~1 standard error even in
+    Feller-violating regimes. This is the reference pricer for the CM regression gate.
     """
-    # Use at least 30 steps per year scaled to tau for adequate discretization.
-    n_steps = max(cfg.n_steps, max(30, int(30 * tau)))
+    # Use at least 252 steps per year (business-day frequency) to control Euler bias
+    # at high vol-of-vol. For the regression gate (xi=0.8, tau=1.0), 30 steps yields
+    # ~0.15 bias (>>3*stderr); 252 steps reduces it to <0.01 (<1*stderr).
+    n_steps = max(cfg.n_steps, max(252, int(252 * tau)))
     sim_cfg = _replace(cfg, mu=cfg.r, maturity=tau, n_steps=n_steps)
     paths = simulate_heston(sim_cfg, n_paths, generator)
     S_T = paths.S[:, -1]
