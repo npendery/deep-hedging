@@ -115,3 +115,58 @@ def test_simulate_merton_martingale_breaks_without_compensator():
     # If the compensator were missing, the mean would be ~ s0/no_comp_factor.
     # With it present, mean ~= s0 -> well above that biased value.
     assert biased_mean > cfg.s0 * no_comp_factor * 1.01
+
+
+# ---------------------------------------------------------------------------
+# Task 9.4: Merton MC vs closed-form Poisson-weighted BS call price
+# ---------------------------------------------------------------------------
+
+def test_simulate_merton_matches_closed_form_call():
+    import math as _math
+    from math import erf, lgamma
+
+    def _norm_cdf(x: float) -> float:
+        return 0.5 * (1.0 + erf(x / _math.sqrt(2.0)))
+
+    def _bs_call(s0, K, T, r, sigma):
+        if sigma <= 0.0 or T <= 0.0:
+            return max(s0 - K * _math.exp(-r * T), 0.0)
+        vol = sigma * _math.sqrt(T)
+        d1 = (_math.log(s0 / K) + (r + 0.5 * sigma ** 2) * T) / vol
+        d2 = d1 - vol
+        return s0 * _norm_cdf(d1) - K * _math.exp(-r * T) * _norm_cdf(d2)
+
+    def _merton_call(s0, K, T, r, sigma, lam, m, s, n_terms=40):
+        k_bar = _math.exp(m + 0.5 * s ** 2) - 1.0
+        lam_p = lam * (1.0 + k_bar)             # lam' = lam*exp(m+0.5 s^2)
+        price = 0.0
+        for n in range(n_terms):
+            sigma_n = _math.sqrt(sigma ** 2 + n * s ** 2 / T)
+            r_n = r - lam * k_bar + n * (m + 0.5 * s ** 2) / T
+            log_w = -lam_p * T + n * _math.log(lam_p * T) - lgamma(n + 1)
+            weight = _math.exp(log_w)
+            price += weight * _bs_call(s0, K, T, r_n, sigma_n)
+        return price
+
+    cfg = ExperimentConfig(
+        s0=100.0, k=100.0, r=0.03, mu=None, sigma=0.2, maturity=1.0, n_steps=100,
+        jump_intensity=1.0, jump_mean=-0.1, jump_std=0.15,
+    )
+    closed = _merton_call(
+        cfg.s0, cfg.k, cfg.maturity, cfg.r, cfg.sigma,
+        cfg.jump_intensity, cfg.jump_mean, cfg.jump_std, n_terms=40,
+    )
+
+    g = torch.Generator().manual_seed(11)
+    n_paths = 500_000
+    paths = simulate_merton(cfg, n_paths=n_paths, generator=g)
+    S_T = paths.S[:, -1]
+    disc = _math.exp(-cfg.r * cfg.maturity)
+    payoff = torch.clamp(S_T - cfg.k, min=0.0) * disc
+    mc_price = payoff.mean().item()
+    mc_stderr = (payoff.std(unbiased=True) / (n_paths ** 0.5)).item()
+
+    # closed-form must lie inside the MC 99% CI (z=2.58).
+    assert abs(mc_price - closed) < 2.58 * mc_stderr, (
+        f"MC={mc_price:.4f} closed={closed:.4f} stderr={mc_stderr:.4f}"
+    )
