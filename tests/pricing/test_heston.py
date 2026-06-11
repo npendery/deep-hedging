@@ -7,7 +7,7 @@ import torch
 
 from deephedge.config import ExperimentConfig
 from deephedge.pricing.black_scholes import bs_delta, bs_price
-from deephedge.pricing.heston import heston_char_func, heston_delta, heston_price_cm
+from deephedge.pricing.heston import heston_char_func, heston_delta, heston_price_cm, heston_price_mc
 
 
 def _cfg(**kw):
@@ -116,3 +116,23 @@ def test_delta_put_via_parity():
     call_d = heston_delta(cfg, K=K, tau=tau, kind="call")
     put_d = heston_delta(cfg, K=K, tau=tau, kind="put")
     assert (call_d - put_d) == pytest.approx(np.exp(-cfg.q * tau), abs=1e-9)
+
+
+def test_mc_returns_price_and_positive_stderr():
+    cfg = _cfg(r=0.0, q=0.0, xi=0.3)
+    gen = torch.Generator().manual_seed(0)
+    price, stderr = heston_price_mc(cfg, K=100.0, tau=0.5, n_paths=20_000,
+                                    generator=gen, kind="call")
+    assert isinstance(price, float) and isinstance(stderr, float)
+    assert 0.0 < price < cfg.s0
+    assert stderr > 0.0
+
+
+def test_mc_is_seed_reproducible():
+    cfg = _cfg()
+    p1, s1 = heston_price_mc(cfg, K=100.0, tau=0.5, n_paths=5_000,
+                             generator=torch.Generator().manual_seed(7), kind="call")
+    p2, s2 = heston_price_mc(cfg, K=100.0, tau=0.5, n_paths=5_000,
+                             generator=torch.Generator().manual_seed(7), kind="call")
+    assert p1 == p2
+    assert s1 == s2

@@ -7,9 +7,14 @@ as tau grows.
 """
 from __future__ import annotations
 
+from dataclasses import replace as _replace
+
 import numpy as np
+import torch
 
 from deephedge.config import ExperimentConfig
+from deephedge.instruments import EuropeanOption, payoff
+from deephedge.simulators.heston import simulate_heston
 
 
 def heston_char_func(u, cfg: ExperimentConfig, tau: float) -> np.ndarray:
@@ -72,6 +77,28 @@ def heston_price_cm(cfg: ExperimentConfig, K: float, tau: float, kind: str = "ca
         fwd = cfg.s0 * np.exp(-cfg.q * tau) - K * np.exp(-cfg.r * tau)
         return float(call - fwd)
     raise ValueError(f"kind must be 'call' or 'put', got {kind!r}")
+
+
+def heston_price_mc(cfg: ExperimentConfig, K: float, tau: float, n_paths: int,
+                    generator: torch.Generator, kind: str = "call") -> tuple[float, float]:
+    """Monte-Carlo Heston price (discounted mean payoff) and standard error.
+
+    Simulates under risk-neutral drift (mu = r) over horizon `tau` using the Heston
+    full-truncation Euler simulator, then discounts the terminal European payoff.
+    The number of time steps is taken from cfg.n_steps (or uses a minimum of 30 steps
+    per year to control discretization bias when tau differs from cfg.maturity).
+    """
+    # Use at least 30 steps per year scaled to tau for adequate discretization.
+    n_steps = max(cfg.n_steps, max(30, int(30 * tau)))
+    sim_cfg = _replace(cfg, mu=cfg.r, maturity=tau, n_steps=n_steps)
+    paths = simulate_heston(sim_cfg, n_paths, generator)
+    S_T = paths.S[:, -1]
+    option = EuropeanOption(strike=K, maturity=tau, kind=kind)
+    disc = float(np.exp(-cfg.r * tau))
+    pay = payoff(option, S_T) * disc           # (n_paths,)
+    price = float(pay.mean().item())
+    stderr = float((pay.std(unbiased=True) / np.sqrt(n_paths)).item())
+    return price, stderr
 
 
 def _heston_P1(cfg: ExperimentConfig, K: float, tau: float, n_grid: int = 4096) -> float:
