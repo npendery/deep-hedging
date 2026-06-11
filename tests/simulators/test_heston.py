@@ -1,5 +1,6 @@
 # tests/simulators/test_heston.py
 import math
+import pytest
 import torch
 
 from deephedge.config import ExperimentConfig
@@ -129,3 +130,10 @@ def test_truncation_function_nonnegative_while_stored_state_may_be_negative():
         "stored variance never went negative in a Feller-violating regime; "
         "the scheme is likely truncating the carried state (wrong family)"
     )
+
+
+def test_qe_scheme_raises_not_implemented():
+    cfg = _cfg(heston_scheme="qe", n_steps=10)
+    gen = torch.Generator(device="cpu").manual_seed(0)
+    with pytest.raises(NotImplementedError, match="Andersen"):
+        simulate_heston(cfg, 100, gen)
