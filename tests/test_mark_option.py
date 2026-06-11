@@ -99,3 +99,64 @@ def test_mark_option_tau_clamped_when_option_matures_before_horizon():
     # an early node (t=0, tau=0.5) is worth strictly more than intrinsic (time value)
     assert (marks[:, 0] > payoff(option, paths.S[:, 0]) - 1e-6).all()
     assert marks[:, 0].mean() > payoff(option, paths.S[:, 0]).mean()
+
+
+import numpy as np
+
+from deephedge.instruments import _heston_implied_vol
+from deephedge.pricing.heston import heston_price_cm
+from deephedge.pricing.black_scholes import bs_price as _bs_price
+
+
+def _heston_cfg(**kw) -> ExperimentConfig:
+    base = dict(
+        s0=100.0, k=100.0, r=0.0, q=0.0,
+        v0=0.04, kappa=1.5, theta=0.04, xi=0.5, rho=-0.7,
+        maturity=1.0, n_steps=8, model="heston", device="cpu",
+    )
+    base.update(kw)
+    return ExperimentConfig(**base)
+
+
+def test_heston_implied_vol_reprices_heston_t0_price():
+    # The inverted BS implied vol, plugged back into bs_price at t0, must reproduce the
+    # Heston model price of the hedge option to tight tolerance.
+    cfg = _heston_cfg()
+    option = EuropeanOption(strike=100.0, maturity=cfg.maturity, kind="call")
+
+    sigma_impl = _heston_implied_vol(cfg, option)
+    assert sigma_impl > 0.0
+    assert np.isfinite(sigma_impl)
+
+    heston_px = heston_price_cm(cfg, K=option.strike, tau=option.maturity, kind="call")
+    bs_px = _bs_price(
+        torch.tensor(cfg.s0), option.strike, option.maturity, cfg.r, sigma_impl, q=cfg.q,
+        kind="call",
+    ).item()
+    assert abs(bs_px - heston_px) < 5e-3
+
+
+def test_mark_option_heston_terminal_equals_payoff_and_t0_matches_heston():
+    cfg = _heston_cfg()
+    option = EuropeanOption(strike=100.0, maturity=cfg.maturity, kind="call")
+    # build a simple Heston-style path bundle (variance held flat for the test paths;
+    # mark_option uses the FROZEN proxy vol, so V is not consumed by the mark)
+    gen = torch.Generator(device="cpu").manual_seed(5)
+    n = cfg.n_steps
+    times = torch.linspace(0.0, cfg.maturity, n + 1)
+    z = torch.randn(40, n, generator=gen)
+    incr = (cfg.drift - 0.5 * cfg.v0) * cfg.dt + (cfg.v0**0.5) * (cfg.dt**0.5) * z
+    log_s = torch.empty(40, n + 1)
+    log_s[:, 0] = torch.log(torch.tensor(cfg.s0))
+    log_s[:, 1:] = log_s[:, :1] + torch.cumsum(incr, dim=1)
+    V = torch.full((40, n + 1), cfg.v0)
+    paths = Paths(S=log_s.exp(), V=V, dt=cfg.dt, times=times)
+
+    marks = mark_option(cfg, paths, option)
+
+    assert marks.shape == (40, n + 1)
+    # terminal column == intrinsic payoff (BS at tau=0)
+    assert torch.allclose(marks[:, -1], payoff(option, paths.S[:, -1]), atol=1e-4)
+    # t0 mark (all paths at s0) reproduces the Heston model price within proxy tolerance
+    heston_px = heston_price_cm(cfg, K=option.strike, tau=option.maturity, kind="call")
+    assert abs(marks[:, 0].mean().item() - heston_px) < 5e-3
