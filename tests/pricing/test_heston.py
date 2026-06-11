@@ -136,3 +136,24 @@ def test_mc_is_seed_reproducible():
                              generator=torch.Generator().manual_seed(7), kind="call")
     assert p1 == p2
     assert s1 == s2
+
+
+def test_REGRESSION_cm_within_3_stderr_of_mc_long_tau_high_volofvol():
+    # MANDATORY GATE (spec §7.2, §13(2)). Feller-violating, long maturity.
+    # phi(0)==1 does NOT catch the b=kappa vs b=kappa-rho*xi drift bug (both pass);
+    # this MC agreement test is the gate that does.
+    cfg = _cfg(
+        s0=100.0, r=0.0, q=0.0,
+        v0=0.04, kappa=1.5, theta=0.04, xi=0.8, rho=-0.7,  # 2*k*theta=0.12 < xi^2=0.64
+    )
+    K, tau = 100.0, 1.0
+    cm = heston_price_cm(cfg, K=K, tau=tau, kind="call")
+    gen = torch.Generator().manual_seed(2026)
+    mc, stderr = heston_price_mc(cfg, K=K, tau=tau, n_paths=500_000,
+                                 generator=gen, kind="call")
+    # Carr-Madan must sit inside the 3-sigma MC confidence band.
+    assert abs(cm - mc) < 3.0 * stderr, (
+        f"Heston CM {cm:.4f} vs MC {mc:.4f} +/- {stderr:.4f} "
+        f"(|diff|={abs(cm - mc):.4f}, 3*stderr={3 * stderr:.4f}) — "
+        f"likely the b=kappa vs b=kappa-rho*xi drift bug"
+    )
