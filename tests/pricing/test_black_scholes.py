@@ -21,3 +21,16 @@ def test_atm_call_price_textbook_value():
     K = torch.tensor(100.0)
     price = bs_price(S, K, 1.0, 0.0, 0.2, kind="call")
     assert torch.allclose(price, torch.tensor(7.9656), atol=1e-3)
+
+
+def test_put_call_parity():
+    # C - P = S*exp(-q*tau) - K*exp(-r*tau). With nonzero r, q, off-ATM strikes.
+    gen = torch.Generator().manual_seed(0)
+    S = 80.0 + 40.0 * torch.rand(16, generator=gen)   # spreads around 100
+    K = torch.tensor(100.0)
+    r, q, sigma, tau = 0.03, 0.01, 0.25, 0.5
+    call = bs_price(S, K, tau, r, sigma, q=q, kind="call")
+    put = bs_price(S, K, tau, r, sigma, q=q, kind="put")
+    lhs = call - put
+    rhs = S * math.exp(-q * tau) - K * math.exp(-r * tau)
+    assert torch.allclose(lhs, rhs, atol=1e-5)
