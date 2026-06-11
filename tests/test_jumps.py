@@ -177,6 +177,7 @@ def test_simulate_merton_matches_closed_form_call():
 # ---------------------------------------------------------------------------
 
 from deephedge.simulators.gbm import simulate_gbm
+from deephedge.simulators.jumps import simulate_bates
 
 
 def test_simulate_merton_zero_intensity_matches_gbm_in_distribution():
@@ -201,3 +202,26 @@ def test_simulate_merton_zero_intensity_matches_gbm_in_distribution():
     qm = torch.quantile(st_m, qs)
     qg = torch.quantile(st_g, qs)
     assert torch.all((qm - qg).abs() / qg < 0.015)
+
+
+# ---------------------------------------------------------------------------
+# Task 9.6: simulate_bates shapes and variance state
+# ---------------------------------------------------------------------------
+
+def test_simulate_bates_shapes_and_variance_state():
+    cfg = ExperimentConfig(
+        s0=100.0, r=0.0, mu=None, maturity=1.0, n_steps=50,
+        v0=0.04, kappa=1.5, theta=0.04, xi=0.5, rho=-0.7,
+        jump_intensity=2.0, jump_mean=-0.1, jump_std=0.15,
+    )
+    g = torch.Generator().manual_seed(0)
+    n_paths = 5_000
+    paths = simulate_bates(cfg, n_paths=n_paths, generator=g)
+    assert isinstance(paths, Paths)
+    assert paths.S.shape == (n_paths, cfg.n_steps + 1)
+    assert paths.V is not None and paths.V.shape == (n_paths, cfg.n_steps + 1)
+    assert torch.allclose(paths.S[:, 0], torch.full((n_paths,), cfg.s0, dtype=paths.S.dtype))
+    assert torch.allclose(paths.V[:, 0], torch.full((n_paths,), cfg.v0, dtype=paths.V.dtype))
+    assert torch.all(paths.S > 0.0)             # jumps act on log-price -> S > 0
+    assert abs(paths.dt - cfg.dt) < 1e-12
+    assert paths.times.shape == (cfg.n_steps + 1,)
