@@ -114,3 +114,38 @@ def test_training_reduces_cvar_on_held_out_batch():
 
     # training must lower tail risk on unseen paths by a clear margin
     assert loss_after < loss_before - 1e-3, (loss_before, loss_after)
+
+
+from deephedge.pricing.black_scholes import bs_delta
+from deephedge.hedger import build_features
+
+
+def test_frictionless_gbm_recovers_bs_delta_within_tolerance():
+    cfg = _tiny_cfg(model="gbm", loss="cvar", alpha=0.95, cost=0.0,
+                    sigma=0.2, n_steps=20, batch_size=4096, seed=11,
+                    epochs=1, steps_per_epoch=120, lr=5e-3)
+    hedger, _ = train(cfg)
+
+    # held-out batch of GBM paths
+    gen = torch.Generator(device=cfg.device)
+    gen.manual_seed(999)
+    paths = get_simulator(cfg.model)(cfg, cfg.batch_size, gen)
+
+    # mid-trajectory step
+    i = cfg.n_steps // 2
+    S_i = paths.S[:, i]                                   # (B,)
+    tau = cfg.maturity - i * cfg.dt                       # scalar time-to-maturity (years)
+    B = S_i.shape[0]
+    prev_holdings = torch.zeros(B, cfg.n_instruments, dtype=S_i.dtype, device=cfg.device)
+    # Feed features EXACTLY as make_nn_strategy does (normalized tau, k_norm=cfg.k) so the
+    # query matches what the hedger was trained on.
+    feats = build_features(S_i, tau / cfg.maturity, prev_holdings, V_i=None, k_norm=cfg.k)
+
+    with torch.no_grad():
+        learned = hedger(feats)[:, 0]                     # underlying holding (B,)
+
+    # BS delta on the same spots; tau as a tensor broadcast (contract: tau float OR tensor)
+    delta = bs_delta(S_i, cfg.k, tau, cfg.r, cfg.sigma, q=cfg.q)
+
+    mean_abs_diff = (learned - delta).abs().mean().item()
+    assert mean_abs_diff < 0.15, mean_abs_diff
