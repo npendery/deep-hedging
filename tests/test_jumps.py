@@ -225,3 +225,23 @@ def test_simulate_bates_shapes_and_variance_state():
     assert torch.all(paths.S > 0.0)             # jumps act on log-price -> S > 0
     assert abs(paths.dt - cfg.dt) < 1e-12
     assert paths.times.shape == (cfg.n_steps + 1,)
+
+
+# ---------------------------------------------------------------------------
+# Task 9.7: simulate_bates martingale check
+# ---------------------------------------------------------------------------
+
+def test_simulate_bates_martingale_with_compensator():
+    cfg = ExperimentConfig(
+        s0=100.0, r=0.0, mu=None, maturity=1.0, n_steps=100,
+        v0=0.04, kappa=1.5, theta=0.04, xi=0.5, rho=-0.7,
+        jump_intensity=5.0, jump_mean=-0.1, jump_std=0.15,
+    )
+    g = torch.Generator().manual_seed(21)
+    n_paths = 500_000
+    paths = simulate_bates(cfg, n_paths=n_paths, generator=g)
+    S_T = paths.S[:, -1]
+    mean_ST = S_T.mean().item()
+    stderr = (S_T.std(unbiased=True) / (n_paths ** 0.5)).item()
+    # r=0 -> discount factor 1; mean must sit within ~3*stderr of s0.
+    assert abs(mean_ST - cfg.s0) < 3 * stderr
